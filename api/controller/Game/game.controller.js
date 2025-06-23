@@ -207,7 +207,7 @@ gameRoomController.gameStart = async (req, res) => {
       }
     }
 
-    closeDeckList.splice(trumpIndex, trumpIndex)
+    closeDeckList.splice(trumpIndex, 1)
 
     // const openDeckCardIndex = Math.floor(Math.random() * closeDeckList.length);
     // const removeOpenDeckCardFromCloseDeck = closeDeckList.splice(openDeckCardIndex, 1)[0];

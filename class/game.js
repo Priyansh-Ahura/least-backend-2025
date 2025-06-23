@@ -104,17 +104,14 @@ class RoomData {
     }
     removeRoom(roomId) {
         // Filter out the room with the specified roomId and update roomData
-        this.roomData = this.roomData.filter((room) => {
-            console.log(`This iS the room ${room}`)
-            room.id !== roomId
-        });
-
-        // Log the updated roomData for verification
-        //    console.log(`Room data after removal:`, this.roomData);
-
+        const initialLength = this.roomData.length;
+        this.roomData = this.roomData.filter((room) => room.id !== roomId);
+        
+        const removed = this.roomData.length < initialLength;
+        console.log(removed ? `Removed room with id: ${roomId}` : `No room found with id: ${roomId}`);
+        
         // Return the updated roomData
         return this.roomData;
-
     }
 
     addPlayer(roomId, playerId) {

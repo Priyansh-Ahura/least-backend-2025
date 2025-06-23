@@ -491,46 +491,52 @@ const dropCards = (gameList, roomId, playerId, dropCardsindex) => {
          return null;
       }
 
-      if (player && player.cards.length > 0) {
-         // Retrieve the cards to be dropped
-         const cardsToDrop = dropCardsindex.map(index => player.cards[index]);
-
-         // Validate that all cards have the same name and points
-         const isValidDrop = cardsToDrop.every(card =>
-            card.cardName === cardsToDrop[0].cardName &&
-            card.cardPoint === cardsToDrop[0].cardPoint
-         );
-
-         if (!isValidDrop) {
-            io.in(roomId).emit("gameError", "All cards to be dropped must have the same name and points.");
-            return null;
-         }
-
-         const droppedCards = [];
-         // Sort indices in descending order to avoid indexing issues during splice
-         dropCardsindex.sort((a, b) => b - a);
-
-         for (let index of dropCardsindex) {
-            const droppedCard = player.cards.splice(dropCardsindex, 1)[0];
-            // const droppedNewCard = player.cards.splice(dropCardsindex, 1)[0];
-            if (droppedCard) {
-               droppedCards.push(droppedCard);
-               player.dropCard = true;
-               updatePlayerPoints(gameDetails);
-               gameDetails.dropDeck.push(droppedCard);
-            }
-         }
-         gameList.addGames(gameDetails);
-         return droppedCards;
-      } else {
-         io.in(roomId).emit("gameError", `Player with ID ${playerId} has no cards to drop.`);
+      // Validate indices
+      const invalidIndices = dropCardsindex.filter(index => index < 0 || index >= player.cards.length);
+      if (invalidIndices.length > 0) {
+         io.in(roomId).emit("gameError", "Invalid card indices provided.");
          return null;
       }
+
+      // Retrieve the cards to be dropped
+      const cardsToDrop = dropCardsindex.map(index => player.cards[index]);
+
+      // Validate that all cards have the same name and points
+      const isValidDrop = cardsToDrop.every(card =>
+         card && card.cardName === cardsToDrop[0].cardName &&
+         card.cardPoint === cardsToDrop[0].cardPoint
+      );
+
+      if (!isValidDrop) {
+         io.in(roomId).emit("gameError", "All cards to be dropped must have the same name and points.");
+         return null;
+      }
+
+      const droppedCards = [];
+      // Sort indices in descending order to avoid indexing issues during splice
+      const sortedIndices = [...dropCardsindex].sort((a, b) => b - a);
+
+      for (let index of sortedIndices) {
+         const droppedCard = player.cards.splice(index, 1)[0]; // Fix: use index, not dropCardsindex
+         if (droppedCard) {
+            droppedCards.push(droppedCard);
+            gameDetails.dropDeck.push(droppedCard);
+         }
+      }
+
+      if (droppedCards.length > 0) {
+         player.dropCard = true;
+         updatePlayerPoints(gameDetails);
+         gameList.addGames(gameDetails);
+      }
+
+      return droppedCards;
    } catch (error) {
       const errorMessage = messages.ErrorDropingCard;
       const game = { roomId, playerId, action, errorMessage };
       Helper.writeGameErrorLog(game, error);
       io.in(roomId).emit("gameError", { action: `${action}-Error`, message: errorMessage });
+      return null;
    }
 };
 
@@ -595,12 +601,13 @@ const pickCard = async (gameList, roomId, playerId, deckType) => {
 };
 
 // Check both conditions and move to the next player if met
-const checkAndMoveToNextPlayer = (roomId, gameDetails, playerId) => {
+const checkAndMoveToNextPlayer = async (roomId, gameDetails, playerId) => {
    const action = "checkAndMoveToNextPlayer-Function";
    try {
       const player = gameDetails.players.find(player => player.id === playerId);
-      if (player.dropCard && player.pickCard) {
-         nextPlayerTurn(roomId, gameDetails);
+      if (player && player.dropCard && player.pickCard) {
+         player.hasTurn = false; // End current player's turn
+         await nextPlayerTurn(roomId, gameDetails);
       }
    } catch (error) {
       const errorMessage = messages.checkAndMoveToNextPlayer;
@@ -667,59 +674,72 @@ const gameStartTimer = (roomId, players, randomTurn, turnClock, closeDeck, dropD
 }
 
 // Handle Player Turn
-const handlePlayerTurns = (roomId, players, randomTurn, turnClock, closeDeck, dropDeck) => {
+const handlePlayerTurns = async (roomId, players, randomTurn, turnClock, closeDeck, dropDeck) => {
    const action = "playerTurn";
    try {
       let currentIndex = players.findIndex(player => player.id === randomTurn);
       if (currentIndex === -1) {
-         io.emit("gameError", "Initial player for randomTurn not found.");
+         io.in(roomId).emit("gameError", { action: "initialTurnError", message: "Initial player for randomTurn not found." });
          return;
       }
 
-      const nextTurn = () => {
-         players.forEach(player => {
-            player.hasTurn = false;
-            player.seconds = 0;
-            player.dropCard = false;
-            player.pickCard = false;
-            player.turnCount = player.turnCount || 0;
-         });
+      // Reset all players' turn states
+      players.forEach(player => {
+         player.hasTurn = false;
+         player.seconds = 0;
+         player.dropCard = false;
+         player.pickCard = false;
+         player.turnCount = player.turnCount || 0;
+      });
 
-         // Find the next active (non-eliminated) player
-         const findNextPlayerIndex = (startIndex) => {
-            let index = startIndex;
-            do {
-               index = (index + 1) % players.length;
-            } while (players[index].isEliminated);
-            return index;
-         };
+      // Find the next active (non-eliminated) player
+      const findNextPlayerIndex = (startIndex) => {
+         let index = startIndex;
+         let attempts = 0;
+         do {
+            index = (index + 1) % players.length;
+            attempts++;
+            if (attempts >= players.length) break; // Prevent infinite loop
+         } while (players[index].isEliminated && attempts < players.length);
+         return index;
+      };
 
+      const currentPlayer = players[currentIndex];
+      currentPlayer.hasTurn = true;
+      currentPlayer.seconds = turnClock;
+      currentPlayer.turnCount++;
 
-         const currentPlayer = players[currentIndex];
-         currentPlayer.hasTurn = true;
-         currentPlayer.seconds = turnClock;
-         currentPlayer.turnCount++;
+      let countdownInterval = null;
+      let currentSeconds = turnClock;
 
-         const countdown = async (seconds) => {
-            if (seconds >= 0) {
-               io.in(roomId).emit("mainGame", { action: "playerTurn", roomId, currentPlayer: currentPlayer.id, countdown: seconds, turn: currentPlayer.turnCount });
+      const stopCountdown = () => {
+         if (countdownInterval) {
+            clearInterval(countdownInterval);
+            countdownInterval = null;
+         }
+      };
 
-               // Check if the player's turn is still active before setting the next countdown
-               if (currentPlayer.hasTurn) {
-                  setTimeout(() => {
-                     countdown(seconds - 1);
-                  }, 1000);
-               }
+      const countdown = () => {
+         countdownInterval = setInterval(async () => {
+            if (currentSeconds >= 0 && currentPlayer.hasTurn) {
+               io.in(roomId).emit("mainGame", { 
+                  action: "playerTurn", 
+                  roomId, 
+                  currentPlayer: currentPlayer.id, 
+                  countdown: currentSeconds, 
+                  turn: currentPlayer.turnCount 
+               });
+               currentSeconds--;
             } else {
+               stopCountdown();
+               
                if (!currentPlayer.hasTurn) {
-                  io.emit("gameError", `${currentPlayer.name} Player turn was completed.`);
-                  return;
+                  return; // Turn was already completed
                }
 
                // Auto drop/pick if player's turn count is greater than 1
                if (currentPlayer.turnCount > 1) {
                   const dropCardIndex = getLowestCardIndex(currentPlayer.cards);
-                  console.log("Auto drop card index:", dropCardIndex);
                   if (dropCardIndex !== -1) {
                      try {
                         await handleDropCard(roomId, currentPlayer.id, [dropCardIndex]);
@@ -730,33 +750,44 @@ const handlePlayerTurns = (roomId, players, randomTurn, turnClock, closeDeck, dr
                   }
                }
 
-               let pickedCard = null;
+               // Handle incomplete turns
                if (currentPlayer.dropCard && !currentPlayer.pickCard) {
-                  pickedCard = await handlePickCard(roomId, currentPlayer.id, 'closeDeck');
+                  try {
+                     await handlePickCard(roomId, currentPlayer.id, 'closeDeck');
+                  } catch (err) {
+                     console.error("Error in auto pick logic:", err);
+                  }
                }
 
-               let gameDetails;
-               if (currentPlayer.dropCard && dropDeck.length > 0) {
-                  gameDetails = gameList.getGameDetails(roomId)[0];
-                  gameDetails.openDeck.unshift(...dropDeck);
+               // Move drop deck to open deck if needed
+               const gameDetails = gameList.getGameDetails(roomId)[0];
+               if (gameDetails && currentPlayer.dropCard && gameDetails.dropDeck.length > 0) {
+                  gameDetails.openDeck.unshift(...gameDetails.dropDeck);
                   gameDetails.dropDeck = [];
-                  dropDeck = [];
                   updatePlayerPoints(gameDetails);
                   gameList.addGames(gameDetails);
                }
 
+               // Move to next player
                const nextPlayerIndex = findNextPlayerIndex(currentIndex);
-               io.in(roomId).emit("mainGame", { action: "nextPlayerTurn", roomId, nextPlayer: players[nextPlayerIndex].id, previousPlayer: currentPlayer.id, examle: "working" });
+               if (nextPlayerIndex !== currentIndex) {
+                  currentPlayer.hasTurn = false;
+                  io.in(roomId).emit("mainGame", { 
+                     action: "nextPlayerTurn", 
+                     roomId, 
+                     nextPlayer: players[nextPlayerIndex].id, 
+                     previousPlayer: currentPlayer.id 
+                  });
 
-               currentIndex = nextPlayerIndex;
-
-               nextTurn();
+                  setTimeout(() => {
+                     handlePlayerTurns(roomId, players, players[nextPlayerIndex].id, turnClock, closeDeck, dropDeck);
+                  }, 1000);
+               }
             }
-         };
-         countdown(turnClock); // Start the countdown without initial delay
+         }, 1000);
       };
 
-      nextTurn();
+      countdown();
    } catch (error) {
       const errorMessage = messages.ErrorPlayerTurn;
       const game = { action, roomId, errorMessage };
@@ -766,41 +797,53 @@ const handlePlayerTurns = (roomId, players, randomTurn, turnClock, closeDeck, dr
 };
 
 // Move to the next player's turn
-const nextPlayerTurn = (roomId, gameDetails) => {
+const nextPlayerTurn = async (roomId, gameDetails) => {
    const action = "nextPlayerTurn";
    try {
       const players = gameDetails.players;
       const currentIndex = players.findIndex(player => player.hasTurn);
 
+      if (currentIndex === -1) {
+         console.error("No player currently has turn");
+         return;
+      }
+
       const findNextPlayerIndex = (startIndex) => {
          let index = startIndex;
+         let attempts = 0;
          do {
             index = (index + 1) % players.length;
-         } while (players[index].isEliminated);
+            attempts++;
+            if (attempts >= players.length) break; // Prevent infinite loop
+         } while (players[index].isEliminated && attempts < players.length);
          return index;
       };
 
-      const nextIndex = findNextPlayerIndex(currentIndex)
-      // (currentIndex + 1) % players.length;
+      const nextIndex = findNextPlayerIndex(currentIndex);
+      
       // Stop the current player's turn
       players[currentIndex].hasTurn = false;
+      players[currentIndex].seconds = 0;
 
+      // Handle drop deck to open deck transfer
       if (gameDetails.dropDeck.length > 0) {
-
          io.in(roomId).emit("mainGame", { action: "openDeckUpdate", dropDeckCard: gameDetails.dropDeck });
-         gameDetails.openDeck.unshift(...gameDetails.dropDeck); // Add drop deck cards to the beginning of the open deck
-         gameDetails.dropDeck = []; // Empty the drop deck
+         gameDetails.openDeck.unshift(...gameDetails.dropDeck);
+         gameDetails.dropDeck = [];
          gameList.addGames(gameDetails);
-
-         const updatedGameDetails = gameList.getGameDetails(roomId)[0];
-         io.in(roomId).emit("mainGame", { action: "nextPlayerTurn", roomId, nextPlayer: players[nextIndex].id, previousPlayer: players[currentIndex].id });
-
-         setTimeout(() => {
-            handlePlayerTurns(roomId, players, players[nextIndex].id, gameDetails.turnClock, gameDetails.closeDeck, gameDetails.dropDeck);
-         }, 1000);
-      } else {
-         handlePlayerTurns(roomId, players, players[nextIndex].id, gameDetails.turnClock, gameDetails.closeDeck, gameDetails.dropDeck);
       }
+
+      io.in(roomId).emit("mainGame", { 
+         action: "nextPlayerTurn", 
+         roomId, 
+         nextPlayer: players[nextIndex].id, 
+         previousPlayer: players[currentIndex].id 
+      });
+
+      // Start next player's turn with a slight delay
+      setTimeout(async () => {
+         await handlePlayerTurns(roomId, players, players[nextIndex].id, gameDetails.turnClock, gameDetails.closeDeck, gameDetails.dropDeck);
+      }, 1000);
    } catch (error) {
       const errorMessage = messages.ErrorNextPlyerTurn;
       const game = { action, roomId, errorMessage };
@@ -1008,7 +1051,8 @@ const handleLeastCall = async (roomId, playerId) => {
          }
 
       } else {
-         checkAndMoveToNextPlayer(roomId, updatedGameDetails, playerId);
+         const gameDetails = gameList.getGameDetails(roomId)[0];
+         await checkAndMoveToNextPlayer(roomId, gameDetails, playerId);
          io.in(roomId).emit("gameError", "Invalid least call request.");
       }
    } catch (error) {
