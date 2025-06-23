@@ -1,0 +1,33 @@
+{
+  "name": "atleast",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "nodemon server.js"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "axios": "^1.7.2",
+    "bcryptjs": "^2.4.3",
+    "body-parser": "^1.20.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "hybrid-crypto-js": "^0.2.4",
+    "jsonwebtoken": "^9.0.2",
+    "latest-version": "^9.0.0",
+    "moment": "^2.30.1",
+    "mongoose": "^8.3.1",
+    "morgan": "^1.10.0",
+    "multer": "^1.4.5-lts.1",
+    "nodemailer": "^6.9.14",
+    "nodemon": "^3.1.0",
+    "redis": "^4.6.13",
+    "sharp": "^0.33.4",
+    "socket.io": "^4.7.5"
+  }
+}

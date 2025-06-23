@@ -1,0 +1,12 @@
+# WARNING: Don't Edit this file since it affects the Pipeline 
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /var/www/html/least
+
+hooks:
+  BeforeInstall:
+    - location: deploy.sh
+      timeout: 300
+      runas: ubuntu
