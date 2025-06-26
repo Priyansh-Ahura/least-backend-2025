@@ -40,10 +40,7 @@ gameRoomController.CreateGameRoom = async (req, res) => {
     // Check if the user is already hosting a room
     const existingRoom = await GameRoomDB.findOne({
       gameHost: userId,
-      $or: [
-        { gameStatus: { $ne: 2 } },
-        { gameStatus: { $ne: 3 } }
-      ],
+      gameStatus: { $nin: [2, 3] },
       flag: { $ne: 2 }
     });
     if (existingRoom) {
@@ -54,8 +51,9 @@ gameRoomController.CreateGameRoom = async (req, res) => {
 
     const playerinRoom = await GameRoomDB.findOne({
       gameHost: userId,
-      gameStatus: { $ne: 1 },
+      gameStatus: { $in: [0, 1] },
     });
+
     if (playerinRoom && gameHost.userStatus === 1) {
       return res.status(statusCode.BadRequest).json({
         message: messages.AlreadyinARoom
@@ -148,89 +146,96 @@ gameRoomController.getRoomDetailsFromCode = async (req, res) => {
 // Before Game Start
 gameRoomController.gameStart = async (req, res) => {
   try {
+    console.log('🔹 gameStart called');
     const id = req.params.id;
+    console.log('→ room id:', id);
+
     const { playerId } = req.body;
-    // const hostId = req.userData.id
+    console.log('→ playerId payload:', playerId);
+
     const room = await GameRoomDB.findById({ _id: id });
+    console.log('→ fetched room:', room);
 
     if (!room) {
-      return res.status(statusCode.NotFound).json({
-        message: messages.RoomNotFound
-      });
+      console.log('⚠️ room not found');
+      return res.status(statusCode.NotFound).json({ message: messages.RoomNotFound });
     }
 
-    // For postman varification token is belongs to correct host
-    // const hostExist = room.gameHost == hostId
-    // if (!hostExist) {
-    //   return res.status(statusCode.BadRequest).json({
-    //     message: messages.HostNotFound
-    //   });
-    // }
+    const alreadyInRoom = await GameRoomDB.findOne({
+      _id: { $ne: id },
+      "players.playerId": { $in: playerId }
+    });
+    console.log('→ alreadyInRoom check:', alreadyInRoom);
 
-    const alreadyInRoom = await GameRoomDB.findOne({ _id: { $ne: id }, "players.playerId": { $in: playerId } });
     if (alreadyInRoom) {
-      return res.status(statusCode.BadRequest).json({
-        message: messages.PlayerAlreadyInRoom
-      });
+      console.log('⚠️ player already in another room');
+      return res.status(statusCode.BadRequest).json({ message: messages.PlayerAlreadyInRoom });
     }
 
-    // playerId.unshift(hostId);
-    let CloseDeckCardList = new CloseDeck()
-    let DropDeckCardList = []
-    let OpenDeckCardList = new OpenDeck()
+    console.log('→ building decks...');
+    let CloseDeckCardList = new CloseDeck();
+    let DropDeckCardList = [];
+    let OpenDeckCardList = new OpenDeck();
 
     const numCardDeck = Helper.calculateCardDecks(playerId.length);
+    console.log('→ numCardDeck:', numCardDeck);
 
-    const cardDeck = []
+    const cardDeck = [];
     for (let c = 0; c < numCardDeck; c++) {
       const deck = await deckDB.find();
-      for (let a = 0; a < deck.length; a++) {
-        const element = deck[a];
-        cardDeck.push(element)
-      }
+      console.log(`→ fetched deck batch ${c}:`, deck.length, 'cards');
+      cardDeck.push(...deck);
     }
+    console.log('→ total cardDeck length:', cardDeck.length);
 
     const shuffledDeck = Helper.shuffleArray(cardDeck);
+    console.log('→ shuffledDeck ready, length:', shuffledDeck.length);
 
-    const closeDeckList = await CloseDeckCardList.addCard(shuffledDeck)
+    const closeDeckList = await CloseDeckCardList.addCard(shuffledDeck);
+    console.log('→ closeDeckList:', closeDeckList.length);
 
-    const trumpIndex = await Math.floor(Math.random() * closeDeckList.length);
+    const trumpIndex = Math.floor(Math.random() * closeDeckList.length);
+    console.log('→ trumpIndex:', trumpIndex);
 
-    const trump = closeDeckList[trumpIndex]
+    const trump = closeDeckList[trumpIndex];
     if (trump) {
       trump.isTrump = true;
+      console.log('→ marked trump:', trump.cardName);
     }
 
-    for (const card of closeDeckList) {
-      if (trump.cardName === card.cardName) {
-        card.isTrump = true;
-      }
-    }
+    closeDeckList.forEach(card => {
+      if (card.cardName === trump.cardName) card.isTrump = true;
+    });
+    console.log('→ after marking duplicates as trump');
 
-    closeDeckList.splice(trumpIndex, trumpIndex)
-
-    // const openDeckCardIndex = Math.floor(Math.random() * closeDeckList.length);
-    // const removeOpenDeckCardFromCloseDeck = closeDeckList.splice(openDeckCardIndex, 1)[0];
-    // const openDeckList = await OpenDeckCardList.addCard(closeDeckList[removeOpenDeckCardFromCloseDeck])
+    closeDeckList.splice(trumpIndex, trumpIndex);
+    console.log('→ closeDeckList after splice:', closeDeckList.length);
 
     const openDeckCardIndex = Math.floor(Math.random() * closeDeckList.length);
+    console.log('→ openDeckCardIndex:', openDeckCardIndex);
+
     const [removeOpenDeckCardFromCloseDeck] = closeDeckList.splice(openDeckCardIndex, 1);
+    console.log('→ removed card for open deck:', removeOpenDeckCardFromCloseDeck.cardName);
+
     const openDeckList = await OpenDeckCardList.addCard(removeOpenDeckCardFromCloseDeck);
+    console.log('→ openDeckList ready:', openDeckList.length);
 
     const cardToEachPlayer = 7;
     const playerRandomTurn = playerId[Math.floor(Math.random() * playerId.length)];
+    console.log('→ playerRandomTurn:', playerRandomTurn);
 
-    const players = []
+    const players = [];
     for (const playerIds of playerId) {
+      console.log('–– dealing to player:', playerIds);
       let userCards = [];
-      let roundScore = [];
-      const user = await UserDB.findById({ _id: playerIds })
-      const playeObjtoPush = { playerId: user._id, playerName: user.userName ?? user.guestId, totalScore: 0 }
+      const user = await UserDB.findById({ _id: playerIds });
+      console.log('→ fetched user:', user);
 
-      await UserDB.findByIdAndUpdate(user._id, { userStatus: 1, currentGame: id })
-      // push joined player into databse
+      await UserDB.findByIdAndUpdate(user._id, { userStatus: 1, currentGame: id });
+      console.log('→ updated user status to in-game');
 
-      await GameRoomDB.findByIdAndUpdate(id, { $push: { players: playeObjtoPush } },);
+      await GameRoomDB.findByIdAndUpdate(id, { $push: { players: { playerId: user._id, playerName: user.userName ?? user.guestId, totalScore: 0 } } });
+      console.log('→ pushed player into roomDB');
 
       const playerObj = {
         id: user._id,
@@ -238,45 +243,42 @@ gameRoomController.gameStart = async (req, res) => {
         profileImage: user.profilePic,
         points: 0,
         seconds: playerRandomTurn == user._id ? room.turnClock : 0,
-        hasTurn: playerRandomTurn == user._id ? true : false,
+        hasTurn: playerRandomTurn == user._id,
         flag: user.flag,
-      }
-
-      // Check if the player is eliminated before dealing cards
+      };
+      console.log('→ initial playerObj:', playerObj);
 
       for (let j = 0; j < cardToEachPlayer; j++) {
-
         if (closeDeckList.length > 0) {
-          let card = closeDeckList.pop();
-
+          const card = closeDeckList.pop();
           userCards.push(card);
-          if (card.isTrump == false) {
-            playerObj.points += card.points;
-          }
-          // console.log(playerObj)
-          // console.log(`User cards and name: ${userCards.length}, ${playerObj.points}`);
+          if (!card.isTrump) playerObj.points += card.points;
         } else {
-          console.log("No more cards to deal!");
+          console.log('⚠️ No more cards to deal!');
           break;
         }
       }
+      console.log('→ dealt cards count:', userCards.length, 'points:', playerObj.points);
+
       playerObj.cards = userCards;
+      playerObj.userScore = { userName: playerObj.name, roundScore: [], totalScore: 0 };
+      playerObj.isEliminated = false;
 
-      playerObj.userScore = {
-        userName: user.userName ?? user.guestId,
-        roundScore: [],
-        totalScore: 0,
-      }
       if (!playerObj.profileImage.includes(config.GOOGLE_IMAGE_BASE_URL)) {
-        playerObj.profileImage = await Helper.getValidImageUrl(playerObj.profileImage)
+        playerObj.profileImage = await Helper.getValidImageUrl(playerObj.profileImage);
+        console.log('→ normalized profileImage URL');
       }
-      playerObj.isEliminated = false
-      players.push(playerObj)
 
+      players.push(playerObj);
+      console.log('→ appended playerObj, totalPlayers so far:', players.length);
     }
-    let currentRound = 1;
-    let spectators = [];
-    const roomId = room._id.toString()
+
+    console.log('→ all players prepared:', players.length);
+
+    const currentRound = 1;
+    const spectators = [];
+    const roomId = room._id.toString();
+
     const gameData = new GameDetails(
       id,
       room.roomName,
@@ -297,26 +299,27 @@ gameRoomController.gameStart = async (req, res) => {
       DropDeckCardList,
       currentRound,
       spectators,
-    )
+    );
+    console.log('→ constructed gameData');
 
-    await redisService.setData(roomId, gameData)
-    // io.getIO().emit("mainGame", {action: 'GameStart', roomId:roomId });
+    await redisService.setData(roomId, gameData);
+    console.log('→ saved gameData to redis');
 
     res.status(statusCode.OK).json({
-      message: "Game  Started!",
+      message: "Game Started!",
       result: gameData
     });
-
-
+    console.log('✅ gameStart response sent');
   } catch (err) {
-    const request = req
-    Helper.writeErrorLog(request, err)
+    console.error('❌ error in gameStart:', err);
+    Helper.writeErrorLog(req, err);
     return res.status(statusCode.InternalServerError).send({
       message: messages.errorTryAgain,
       error: err
-    })
+    });
   }
-}
+};
+
 
 // Get Rooms List
 gameRoomController.getGameRoomsList = async (req, res) => {

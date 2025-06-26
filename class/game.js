@@ -104,10 +104,9 @@ class RoomData {
     }
     removeRoom(roomId) {
         // Filter out the room with the specified roomId and update roomData
-        this.roomData = this.roomData.filter((room) => {
-            console.log(`This iS the room ${room}`)
+        this.roomData = this.roomData.filter(room =>
             room.id !== roomId
-        });
+        );
 
         // Log the updated roomData for verification
         //    console.log(`Room data after removal:`, this.roomData);

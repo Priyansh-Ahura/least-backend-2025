@@ -5,7 +5,6 @@ const { format } = require('path')
 
 module.exports = async (req, res, next) => {
   try {
-    console.log(req)
     const requestURL = req.protocol + '://' + req.get('host') + req.originalUrl
 
     const requestBody = JSON.stringify(req.body)
