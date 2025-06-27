@@ -163,9 +163,10 @@ gameRoomController.gameStart = async (req, res) => {
 
     const alreadyInRoom = await GameRoomDB.findOne({
       _id: { $ne: id },
-      "players.playerId": { $in: playerId }
+      "players.playerId": { $in: playerId },
+      gameStatus: { $in: [0, 1] },
+      flag: 1,
     });
-    console.log('→ alreadyInRoom check:', alreadyInRoom);
 
     if (alreadyInRoom) {
       console.log('⚠️ player already in another room');

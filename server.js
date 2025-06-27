@@ -151,6 +151,7 @@ io.on('connection', async (socket) => {
 
 				}
 			} else if (data.action == "Remove") {
+				console.log("from Remove")
 				if (roomId) {
 					console.log(data.action)
 
@@ -268,6 +269,7 @@ io.on('connection', async (socket) => {
 	socket.on('disconnect', async () => {
 		const action = "disconnect";
 		try {
+			console.log("from disconnect")
 			const customId = customIdToSocketMap.get(socket.id);
 			const roomId = roomList.getRoomPlayerDetails(customId);
 

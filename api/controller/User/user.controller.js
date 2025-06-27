@@ -91,7 +91,6 @@ userController.socialSignin = async (req, res) => {
 
 //Guest login
 userController.guestLogin = async (req, res) => {
-
     const { device, guestId } = req.body
     // console.log("im someone's body ", req.body)
     try {
