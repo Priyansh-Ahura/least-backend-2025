@@ -93,8 +93,6 @@ io.on('connection', async (socket) => {
 					}
 				}
 
-
-
 				// // Check if roomId is provided
 				if (roomId == "" || playerId == "") {
 					return io.in(roomId).emit("joinRoomError", "Room ID is required.");
@@ -1017,7 +1015,7 @@ const handleLeastCall = async (roomId, playerId) => {
 			// Check if only two players were left and one got eliminated
 			const remainingPlayers = gameDetails.players.filter(player => !player.userScore.roundScore[gameDetails.currentRound - 1]?.isEliminated);
 
-			if (remainingPlayers.length === 1 && !remainingPlayers.isEliminated) {
+			if (remainingPlayers.length === 1) {
 				await handlePlayerElimination(gameDetails);
 				io.in(roomId).emit("mainGame", { action: "leastCall", leastCaller: leastCaller, isWinner: isLeastCallerWinner, roundWinner: winner, currentRound: gameDetails.currentRound, gameCompleted: true, gameDetails });
 				declareGameWinner(roomId);
